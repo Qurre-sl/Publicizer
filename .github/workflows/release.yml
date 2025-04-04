@@ -14,7 +14,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: '6.0.x'
+          dotnet-version: '8.0.x'
 
       - name: Publish for Windows
         run: dotnet publish -c Release -r win-x64 --self-contained true -o publish/win
