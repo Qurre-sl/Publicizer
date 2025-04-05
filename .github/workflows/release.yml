@@ -1,74 +1,208 @@
-name: Create Release
+# Имя Workflow, отображаемое в GitHub Actions
+name: Release Workflow
 
+# Триггер: Запускать при пуше нового тега формата vX.Y.Z
 on:
   push:
-    tags: ['*']
+    tags:
+      - 'v*.*.*' # Например: v1.0.0, v2.3.4, v1.2.3-beta
+
+# Разрешения, необходимые для workflow
+permissions:
+  contents: write # Необходимо для создания релиза и загрузки артефактов
 
 jobs:
-  build_and_release:
+  # Задача сборки приложения под разные ОС
+  build:
+    name: Build for ${{ matrix.os }}
+    # Запускать на ОС из матрицы
+    runs-on: ${{ matrix.os }}
+    # Стратегия матрицы для параллельной сборки под разные ОС
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Дополнительные переменные для каждой ОС в матрице
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64          # Runtime Identifier для Linux x64
+            artifact_name: linux-app # Имя артефакта для Linux
+            output_name: Publicizer-linux-x64 # Имя конечного файла
+          - os: windows-latest
+            rid: win-x64            # Runtime Identifier для Windows x64
+            artifact_name: windows-app # Имя артефакта для Windows
+            output_name: Publicizer-win-x64.exe # Имя конечного файла
+          - os: macos-latest
+            rid: osx-x64            # Runtime Identifier для macOS x64 (или osx-arm64 для Apple Silicon)
+            artifact_name: macos-app   # Имя артефакта для macOS
+            output_name: Publicizer-osx-x64 # Имя конечного файла
+
+    steps:
+    # Шаг 1: Получение кода из репозитория (той версии, на которую указывает тег)
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Шаг 2: Настройка .NET SDK 8.0
+    - name: Setup .NET 8.0
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    # Шаг 3: Восстановление NuGet зависимостей
+    - name: Restore dependencies
+      run: dotnet restore Publicizer.slnx
+
+    # Шаг 4 (Опционально, но рекомендуется): Проверка соответствия версии в AssemblyVersion.cs тегу
+    - name: Verify Version in AssemblyVersion.cs
+      # Эта команда извлекает версию из файла и сравнивает с тегом
+      run: |
+        TAG_VERSION=${GITHUB_REF_NAME#v} # Удаляем префикс 'v' из тега (e.g., v1.2.0 -> 1.2.0)
+        # Используем grep для извлечения версии. Настройте путь и шаблон при необходимости.
+        CS_VERSION=$(grep -oP '(?<=AssemblyVersion\(")[^"]+' AssemblyVersion.cs)
+        echo "Tag Version: $TAG_VERSION"
+        echo "Assembly Version: $CS_VERSION"
+        if [ "$TAG_VERSION" != "$CS_VERSION" ]; then
+          echo "Error: AssemblyVersion.cs version ($CS_VERSION) does not match tag ($TAG_VERSION)."
+          exit 1
+        fi
+        # Проверяем также AssemblyFileVersion
+        CS_FILE_VERSION=$(grep -oP '(?<=AssemblyFileVersion\(")[^"]+' AssemblyVersion.cs)
+         echo "Assembly File Version: $CS_FILE_VERSION"
+        if [ "$TAG_VERSION" != "$CS_FILE_VERSION" ]; then
+          echo "Error: AssemblyFileVersion.cs version ($CS_FILE_VERSION) does not match tag ($TAG_VERSION)."
+          exit 1
+        fi
+      shell: bash # Используем bash для команд grep и сравнения
+
+    # Шаг 5: Сборка и публикация приложения
+    - name: Build and Publish
+      # Собираем как самодостаточное приложение в одном файле
+      run: dotnet publish Publicizer.csproj --configuration Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -o ./publish/${{ matrix.artifact_name }} /p:AssemblyName=${{ matrix.output_name }}
+
+    # Шаг 6: Загрузка собранного приложения как артефакта сборки
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }} # Имя артефакта (linux-app, windows-app, macos-app)
+        path: ./publish/${{ matrix.artifact_name }}/* # Путь к файлам для загрузки
+
+  # Задача создания релиза на GitHub
+  release:
+    name: Create GitHub Release
+    # Запускать только после успешного завершения задачи 'build' для всех ОС
+    needs: build
+    # Эта задача может выполняться на Ubuntu
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    # Шаг 1: Получение кода с полной историей Git (нужно для changelog)
+    - name: Checkout code (full history)
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Получаем всю историю коммитов
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: '8.0.x'
+    # Шаг 2: Получение версии из имени тега (без префикса 'v')
+    - name: Get Version from Tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
 
-      - name: Publish for Windows
-        run: dotnet publish -c Release -r win-x64 --self-contained true -o publish/win
+    # Шаг 3: Загрузка всех артефактов сборки (созданных в задаче 'build')
+    - name: Download all build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts # Загружаем все артефакты в папку 'artifacts'
 
-      - name: Publish for Linux
-        run: dotnet publish -c Release -r linux-x64 --self-contained true -o publish/linux
+    # Шаг 4: Подготовка путей к артефактам для загрузки в релиз
+    # (Находим все файлы во вложенных папках артефактов)
+    - name: Prepare artifact paths for release
+      id: prep_artifacts
+      run: |
+        cd artifacts
+        # Находим все файлы внутри папок linux-app, windows-app, macos-app
+        ASSET_PATHS=$(find . -type f | sed 's|^./||' | paste -sd ',')
+        echo "Found assets: $ASSET_PATHS"
+        # Сохраняем пути в формате, подходящем для softprops/action-gh-release
+        echo "ASSET_PATHS=${ASSET_PATHS}" >> $GITHUB_OUTPUT
+      shell: bash
 
-      - name: Publish for macOS
-        run: dotnet publish -c Release -r osx-x64 --self-contained true -o publish/macos
+    # Шаг 5: Генерация списка изменений (Changelog)
+    - name: Generate Changelog
+      id: changelog
+      run: |
+        echo "Generating changelog for tag ${{ github.ref_name }}"
+        # Пытаемся найти предыдущий тег
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null)
 
-      - name: Archive builds
-        run: |
-          zip -jr publish/win-x64.zip publish/win
-          zip -jr publish/linux-x64.zip publish/linux
-          zip -jr publish/macos-x64.zip publish/macos
+        COMMIT_RANGE=""
+        # Если предыдущий тег не найден (это первый релиз/тег)
+        if [ -z "$PREVIOUS_TAG" ]; then
+          echo "No previous tag found. Using all commits."
+          # Находим хэш самого первого коммита
+          FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
+          COMMIT_RANGE="${FIRST_COMMIT}..${{ github.ref_name }}"
+          PREVIOUS_TAG_NAME="Initial commit" # Для ссылки на сравнение
+        else
+          echo "Previous tag found: $PREVIOUS_TAG"
+          COMMIT_RANGE="${PREVIOUS_TAG}..${{ github.ref_name }}"
+          PREVIOUS_TAG_NAME=$PREVIOUS_TAG # Для ссылки на сравнение
+        fi
 
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          body: Automated release for version ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-        id: create_release
+        echo "Commit range for changelog: $COMMIT_RANGE"
 
-      - name: Upload Windows Artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./publish/win-x64.zip
-          asset_name: win-x64.zip
-          asset_content_type: application/zip
+        # Получаем список коммитов в формате "* Сообщение by @Автор"
+        COMMIT_LOG=$(git log $COMMIT_RANGE --pretty=format:'* %s by @%an')
+        # Получаем уникальный список авторов коммитов в этом диапазоне
+        CONTRIBUTORS=$(git log $COMMIT_RANGE --pretty=format:'%an' | sort -u | sed -e 's/^/- @/' | paste -sd '\n' -)
 
-      - name: Upload Linux Artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./publish/linux-x64.zip
-          asset_name: linux-x64.zip
-          asset_content_type: application/zip
+        # Создаем ссылку для сравнения версий на GitHub
+        if [ "$PREVIOUS_TAG_NAME" == "Initial commit" ]; then
+          # Ссылка на все коммиты до текущего тега
+          COMPARE_LINK="https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}"
+        else
+          # Ссылка на сравнение между тегами
+          COMPARE_LINK="https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG_NAME}...${{ github.ref_name }}"
+        fi
 
-      - name: Upload macOS Artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./publish/macos-x64.zip
-          asset_name: macos-x64.zip
-          asset_content_type: application/zip
+        # Формируем тело релиза (описание)
+        CHANGELOG_BODY=$(cat <<EOF
+        **Changes in this release (${{ env.VERSION }})**
+
+        ${COMMIT_LOG}
+
+        **Contributors:**
+        ${CONTRIBUTORS:-None}
+
+        **Full Changelog:** ${COMPARE_LINK}
+        EOF
+        )
+
+        # Сохраняем тело релиза в переменную для использования на следующем шаге
+        # Используем специальный синтаксис для многострочных переменных в GITHUB_OUTPUT
+        echo "changelog_body<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG_BODY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "--- Generated Changelog Body ---"
+        echo "$CHANGELOG_BODY"
+        echo "-------------------------------"
+      shell: bash
+
+    # Шаг 6: Создание и публикация релиза на GitHub
+    - name: Create GitHub Release
+      # Используем популярный action для создания релизов
+      uses: softprops/action-gh-release@v2
+      with:
+        # Имя тега, для которого создается релиз
+        tag_name: ${{ github.ref_name }}
+        # Название релиза (например, "Release 1.2.0")
+        name: Release ${{ env.VERSION }}
+        # Тело релиза (описание), сгенерированное на предыдущем шаге
+        body: ${{ steps.changelog.outputs.changelog_body }}
+        # Не создавать как черновик
+        draft: false
+        # Не помечать как pre-release (если нужно, измените на true)
+        prerelease: false
+        # Файлы для загрузки в релиз (пути из шага prep_artifacts)
+        # Загружаем все файлы из папки artifacts (включая подпапки)
+        files: artifacts/**/*
+      env:
+        # Токен для аутентификации при создании релиза (предоставляется GitHub Actions)
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
