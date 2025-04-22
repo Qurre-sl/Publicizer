@@ -20,7 +20,7 @@ jobs:
       - name: Extract version
         id: extract-version
         run: |
-          VERSION=$(echo "${{ github.event.head_commit.message }}" | sed -n 's/release: \(.*\)/\1/p')
+          VERSION=$(echo "${{ github.event.head_commit.message }}" | sed -n 's/release: \([^ ]*\).*/\1/p')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Update AssemblyInfo.cs
@@ -101,7 +101,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 9.0.x
+
+      - uses: nuget/setup-nuget@v2
          
       - name: Publish
         run: |
