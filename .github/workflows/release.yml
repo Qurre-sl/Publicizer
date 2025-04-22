@@ -73,14 +73,6 @@ jobs:
           name: release-notes
           path: release-notes.md # Путь к файлу, указанный в outputFile
 
-
-      # 3. Загружаем сгенерированные заметки как артефакт
-      - name: Upload Release Notes Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-notes
-          path: release-notes.md # Путь к файлу, указанный в outputFile
-
   build:
     needs: prepare-release
     strategy:
