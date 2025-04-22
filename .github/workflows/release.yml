@@ -34,14 +34,17 @@ jobs:
           git config user.email "actions@github.com"
           git add AssemblyInfo.cs
           git commit -m "ignore: update version to ${{ steps.extract-version.outputs.version }}"
+        continue-on-error: true # Продолжить выполнение в случае ошибки
 
       - name: Create tag
         run: git tag ${{ steps.extract-version.outputs.version }}
+        continue-on-error: true # Продолжить выполнение в случае ошибки
 
       - name: Push changes
         run: |
           git push origin main
           git push origin ${{ steps.extract-version.outputs.version }}
+        continue-on-error: true # Продолжить выполнение в случае ошибки
 
   create-changelog:
     needs: prepare-release
