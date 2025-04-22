@@ -24,7 +24,7 @@ get_user_login() {
   echo "$username" # Возвращаем найденный логин или пустую строку
 }
 
-VERSION=${GITHUB_REF_NAME}
+VERSION=${{ needs.prepare-release.outputs.version }}
 echo "Generating release notes for version: $VERSION"
 
 # Находим предыдущий тег. Если его нет (первый релиз), PREV_TAG будет пустым.
