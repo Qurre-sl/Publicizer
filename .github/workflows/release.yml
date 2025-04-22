@@ -46,10 +46,6 @@ jobs:
   create-changelog:
     needs: prepare-release
     runs-on: ubuntu-latest
-    outputs:
-      # Выводим путь к файлу и его содержимое для использования в следующих шагах
-      changelog_path: ${{ steps.changelog_builder.outputs.output_file_path }}
-      changelog_content: ${{ steps.changelog_builder.outputs.changelog }}
     steps:
       # 1. Получаем код репозитория
       # fetch-depth: 0 нужен, чтобы получить всю историю и теги для Action'а
@@ -57,83 +53,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          
+      # 2. Задаем права на запуск скрипта
+      - name: Make changelog script executable
+        run: chmod +x ./.github/changelog-generator.sh
 
-      # 2. Генерируем Changelog с помощью Action'а
+      # 3. Генерируем Changelog
       - name: Build Changelog
         id: changelog_builder
-        # Используем Action mikepenz/release-changelog-builder-action
-        uses: mikepenz/release-changelog-builder-action@v5
-        with:
-          # Указываем тег/версию, ДО которой генерировать заметки
-          # Он берется из вывода предыдущего Job'а
-          toTag: ${{ needs.prepare-release.outputs.version }}
-
-          # Имя файла, куда будут сохранены заметки
-          outputFile: "release-notes.md"
-
-          # Устанавливаем режим работы по коммитам
-          mode: "COMMIT"
-
-          # Файл конфигурации для тонкой настройки:
-          configuration: ".github/changelog-config.json"
-        env:
-          # Обязательно! Токен нужен для доступа к GitHub API (получение PR, логинов и т.д.)
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Custom changelog
-        id: changelog
-        run: |
-          # Получаем версию из предыдущего шага
-          VERSION=${{ needs.prepare-release.outputs.version }}
-          echo "✨ Generating custom release notes for version: $VERSION"
-
-          # Находим предыдущий тег. Если его нет (первый релиз), PREV_TAG будет пустым.
-          # Используем VERSION^ для поиска тега перед текущей версией.
-          PREV_TAG=$(git describe --tags --abbrev=0 ${VERSION}^ 2>/dev/null || echo "")
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, assuming this is the first release."
-            # В случае первого релиза диапазон для коммитов будет от начала истории до VERSION
-            RANGE=$VERSION
-            # Ссылка для сравнения будет указывать на первый коммит (можно уточнить при необходимости)
-            COMPARE_URL="https://github.com/$GITHUB_REPOSITORY/commits/$VERSION"
-          else
-            echo "Previous tag found: $PREV_TAG"
-            # Диапазон коммитов для этого релиза
-            RANGE="$PREV_TAG..$VERSION"
-            # Ссылка для сравнения между тегами
-            COMPARE_URL="https://github.com/$GITHUB_REPOSITORY/compare/$PREV_TAG...$VERSION"
-          fi
-
-          # 2. Определяем новых участников
-          # Получаем уникальных авторов в текущем диапазоне релиза
-          CURRENT_AUTHORS=$(git log --pretty=format:"%aN" $RANGE | sort -u)
-
-          if [ -z "$PREV_TAG" ]; then
-            # Если это первый релиз, все авторы считаются новыми
-            NEW_CONTRIBUTORS_LIST="$CURRENT_AUTHORS"
-          else
-            # Получаем уникальных авторов во всей истории ДО предыдущего тега
-            # Используем $PREV_TAG в качестве конечной точки истории "прошлых" авторов
-            PAST_AUTHORS=$(git log --pretty=format:"%aN" $PREV_TAG | sort -u)
-            # Находим авторов, которые есть в CURRENT_AUTHORS, но нет в PAST_AUTHORS
-            # comm -13 выводит строки, уникальные для второго файла (CURRENT_AUTHORS)
-            NEW_CONTRIBUTORS_LIST=$(comm -13 <(echo "$PAST_AUTHORS" | sort) <(echo "$CURRENT_AUTHORS" | sort))
-          fi
-
-          # Форматируем список новых участников
-          if [ -n "$NEW_CONTRIBUTORS_LIST" ]; then
-            CONTRIBUTORS=$(echo "$NEW_CONTRIBUTORS_LIST" | paste -s -d ', ')
-            echo "New contributors found: $CONTRIBUTORS"
-          else
-            CONTRIBUTORS="No new contributors in this release."
-            echo "No new contributors in this release."
-          fi
-
-          sed -i '/^- ignore: /d' release-notes.md
-          sed -i "s|{{NEW_CONTRIBUTORS}}|$CONTRIBUTORS|g" release-notes.md
-          sed -i "s|{{COMPARE_URL}}|$COMPARE_URL|g" release-notes.md
+        run: ./.github/changelog-generator.sh
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 4. Загружаем сгенерированные заметки как артефакт
+      - name: Upload Release Notes Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md # Путь к файлу, указанный в outputFile
 
 
       # 3. Загружаем сгенерированные заметки как артефакт

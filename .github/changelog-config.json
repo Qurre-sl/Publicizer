@@ -1,6 +1,0 @@
-{
-  "commit_template": "- #{{TITLE}} by @#{{AUTHOR}} (`#{{MERGE_SHA}}`)",
-  "empty_template": "- no changes",
-  "template": "# Changelog #{{TO_TAG}}\n\n<details>\n<summary>Changelog</summary>\n\n#{{CHANGELOG}}\n</details>\n\n### New Contributors\n{{NEW_CONTRIBUTORS}}\n\n**Full changes list**: {{COMPARE_URL}}\n\n###### Files changed: #{{CHANGED_FILES}} | Additions: #{{ADDITIONS}} | Deletions: #{{DELETIONS}} | Days since: #{{DAYS_SINCE}}",
-  "sort": "DESC"
-}
