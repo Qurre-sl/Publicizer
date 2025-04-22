@@ -68,6 +68,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          OUTPUT_VERSION: ${{ needs.prepare-release.outputs.version }}
 
       # 4. Загружаем сгенерированные заметки как артефакт
       - name: Upload Release Notes Artifact
