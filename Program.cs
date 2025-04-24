@@ -77,88 +77,55 @@ void PublicizeType(TypeDefinition type)
         PublicizeType(nestedType);
 
     foreach (MethodDefinition? method in type.Methods.Where(x => x is { IsPublic: false }))
-    {
-        method.IsPrivate = false;
-        method.IsAssembly = false;
-        method.IsFamily = false;
-        method.IsFamilyAndAssembly = false;
-        method.IsFamilyOrAssembly = false;
-        method.IsPublic = true;
-    }
+        PublicizeMethod(method);
 
     foreach (FieldDefinition? field in type.Fields.Where(x => x is { IsPublic: false }))
-    {
-        field.IsPrivate = false;
-        field.IsAssembly = false;
-        field.IsFamily = false;
-        field.IsFamilyAndAssembly = false;
-        field.IsFamilyOrAssembly = false;
-        field.IsPublic = true;
-    }
+        PublicizeField(field, !field.Name.EndsWith(">k__BackingField"));
 
     foreach (PropertyDefinition? property in type.Properties)
     {
         if (property.GetMethod is { IsPublic: false })
-        {
-            property.GetMethod.IsPrivate = false;
-            property.GetMethod.IsAssembly = false;
-            property.GetMethod.IsFamily = false;
-            property.GetMethod.IsFamilyAndAssembly = false;
-            property.GetMethod.IsFamilyOrAssembly = false;
-            property.GetMethod.IsPublic = true;
-        }
+            PublicizeMethod(property.GetMethod);
 
         if (property.SetMethod is { IsPublic: false })
-        {
-            property.SetMethod.IsPrivate = false;
-            property.SetMethod.IsAssembly = false;
-            property.SetMethod.IsFamily = false;
-            property.SetMethod.IsFamilyAndAssembly = false;
-            property.SetMethod.IsFamilyOrAssembly = false;
-            property.SetMethod.IsPublic = true;
-        }
+            PublicizeMethod(property.SetMethod);
     }
 
     foreach (EventDefinition? @event in type.Events)
     {
-        foreach (FieldDefinition? field in @event.DeclaringType.Fields.Where(field => field.Name == @event.Name))
-        {
-            field.IsPrivate = true;
-            field.IsAssembly = false;
-            field.IsFamily = false;
-            field.IsFamilyAndAssembly = false;
-            field.IsFamilyOrAssembly = false;
-            field.IsPublic = false;
-        }
+        foreach (FieldDefinition? duplicateField in @event.DeclaringType.Fields.Where(x => x.Name == @event.Name))
+            PublicizeField(duplicateField, false);
 
         if (@event.AddMethod is { IsPublic: false })
-        {
-            @event.AddMethod.IsPrivate = false;
-            @event.AddMethod.IsAssembly = false;
-            @event.AddMethod.IsFamily = false;
-            @event.AddMethod.IsFamilyAndAssembly = false;
-            @event.AddMethod.IsFamilyOrAssembly = false;
-            @event.AddMethod.IsPublic = true;
-        }
+            PublicizeMethod(@event.AddMethod);
 
         if (@event.RemoveMethod is { IsPublic: false })
-        {
-            @event.RemoveMethod.IsPrivate = false;
-            @event.RemoveMethod.IsAssembly = false;
-            @event.RemoveMethod.IsFamily = false;
-            @event.RemoveMethod.IsFamilyAndAssembly = false;
-            @event.RemoveMethod.IsFamilyOrAssembly = false;
-            @event.RemoveMethod.IsPublic = true;
-        }
+            PublicizeMethod(@event.RemoveMethod);
 
         if (@event.InvokeMethod is { IsPublic: false })
-        {
-            @event.InvokeMethod.IsPrivate = false;
-            @event.InvokeMethod.IsAssembly = false;
-            @event.InvokeMethod.IsFamily = false;
-            @event.InvokeMethod.IsFamilyAndAssembly = false;
-            @event.InvokeMethod.IsFamilyOrAssembly = false;
-            @event.InvokeMethod.IsPublic = true;
-        }
+            PublicizeMethod(@event.InvokeMethod);
     }
+}
+
+void PublicizeMethod(MethodDefinition cl)
+{
+    cl.IsPrivate = false;
+    cl.IsAssembly = false;
+    cl.IsFamily = false;
+    cl.IsFamilyAndAssembly = false;
+    cl.IsFamilyOrAssembly = false;
+    cl.IsPublic = true;
+}
+
+void PublicizeField(FieldDefinition cl, bool publicize = true)
+{
+    cl.IsAssembly = false;
+    cl.IsFamily = false;
+    cl.IsFamilyAndAssembly = false;
+    cl.IsFamilyOrAssembly = false;
+
+    if (publicize)
+        cl.Attributes = (cl.Attributes & ~FieldAttributes.Private) | FieldAttributes.Public;
+    else
+        cl.Attributes = (cl.Attributes & ~FieldAttributes.Public) | FieldAttributes.Private;
 }
